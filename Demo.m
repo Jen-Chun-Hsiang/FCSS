@@ -1,13 +1,30 @@
+% USAGE INSTRUCTION
+% 1). Load the registered, denoised time-lapse images (in a 3D array) in a variable named 'I' 
+%   - In this demo, I load it from 'Demo.mat'
+% 2). After intensity function clustering (~ 25 mins), you need to pick those clusters
+% that are not the background nor the noise-contaminated pixels (a dialog box will pop up)
+%   - In this demo, I picked the first 3 clusters, and skip the rest.
+% 3). The final result (total time ~ 45 mins) is that the pixel-wised ROIs will be stored in a variable called
+% 'SlcROI', which is a cell structure containing binary spatial info for each selected ROI
+%
+% MATLAB REQUIREMENT
+% Please make sure you have installed 'statistics and machine learning
+% toolbox', 'image processing toolbox'
+
+
 %% Define Parameters
+Fz = 9.48; % Sampling rate of 2-P imaging (frames/second)
 MinDimByExpla = 0.8;
 LJClusterK = 8;
-IsProcessVidualized = 1;
-Fz = 9.48;
+IsProcessVisualized = 1;
 CluMinSize = 4;
 
-%%
-load('Demo.mat');
-
+%% Load data and functions
+% load a variable 'I' as the 3D array of the registered time-lapse 2-p imaging 
+% I: [Height, Width, Time]
+load('Demo.mat'); 
+addpath(genpath('Lib'));
+addpath(genpath('3rdPartyLib'));
 %% Pixel-wise Functional Clustering
 ImgClm = I;
 ImgClm = reshape(ImgClm(:), size(ImgClm, 1)*size(ImgClm, 2), []); % Convert 3D to 2D (pixel, timepoints)
@@ -36,7 +53,7 @@ else
     end
     [~, SortedIdx] = sort(ClusterMean, 'descend');
     
-    if IsProcessVidualized
+    if IsProcessVisualized
         Colors = parula(NumCluster);  
         figure;
         subplot(1, 2, 1);
@@ -55,7 +72,7 @@ else
         'Idx', 'SortedIdx', 'SpatialIdx', 'T', 'Clusters', 'NumCluster', 'Colors', 'ClusterMean', 'ClusterMeanTraces');
 end
 
-%% Manually Select the response cluster and perform farther separation
+%% Manually select the responsive clusters and perform further functional segmentation
 FilNam = 'Demo_ROIs_SemiCluster';
 
 clear SelecClusterMask
@@ -78,6 +95,8 @@ else
             SpatialIdx = reshape(Idx ==Clusters(SortedIdx(i)), size(I, 1), size(I, 2));
             imagesc(SpatialIdx);colorbar;
             keyboard;
+            % (Instruction) for the data from Demo.mat, I take the first three, and skip
+            % the rest.
             Answer = keepCluster;
             if Answer == 2
                 SelecCluster(i:end) = 0;
@@ -100,9 +119,9 @@ else
         
     % Functionally decompose the selected intensity cluster
     ReducedImgClm = TemporalDimensionReduction(ImgClm, MinDimByExpla);
-    [SelecClusterMask, FigureH] = SpatialFunctionalDecompose(ReducedImgClm, SelecClusterMask, size(I, 1), size(I, 2), 48);
+    [SelecClusterMask, FigureH] = SpatialFunctionalDecompose(ReducedImgClm, SelecClusterMask, size(I, 1), size(I, 2), LJClusterK);
     
-    if IsProcessVidualized
+    if IsProcessVisualized
         NumCluster = length(SelecClusterMask);
         Colors = parula(NumCluster);  
         figure;
@@ -117,8 +136,7 @@ else
         'SelecCluster', 'SelecClusterMask', 'SpatialIdx');
 end
 
-%%
-% Automatic Select ROI
+%% Spatially separate the selected clusters for further segmentation
 FilNam = 'Demo_ROIs_AutoCluster';
 if exist(['./ROIs/' FilNam '.mat'], 'file')
     disp('Loading ROI dataset...');
@@ -148,7 +166,7 @@ else
         SlcROI{i} = CurSlcROI == 1;
     end
     
-    if IsProcessVidualized
+    if IsProcessVisualized
         figure; 
         subplot(1, 2, 1);
         imagesc(MultiSelClu);colorbar;
@@ -162,32 +180,32 @@ else
         'CluCel', 'SlcROI', 'SelClu', 'RmvPix', 'CluObj', 'CluMinSize');
 end
 
-%%
+%% Merge neighboring components exhibiting similar function and iterate until unchanged
 FilNam = 'Demo_ROIs_ConvergentCluster';
 if exist(['./ROIs/' FilNam '.mat'], 'file')
     disp('Loading Convergent ROI dataset...');
     load(['./ROIs/' FilNam '.mat']);
 else
     ProcessingdRecord.NumROI_BeforeConverge = length(SlcROI);
-    [SlcROIMerge, ProcessingdRecord.IterConverge] = SpatialFunctionalDecompose_ROIBased(ReducedImgClm, SlcROI, 48);
+    [SlcROIMerge, ProcessingdRecord.IterConverge] = SpatialFunctionalDecompose_ROIBased(ReducedImgClm, SlcROI, LJClusterK);
     ProcessingdRecord.NumROI_AfterConverge = length(SlcROIMerge);    
     clear CluCel
     
-    if IsProcessVidualized
+    if IsProcessVisualized
         figure; 
         subplot(1, 2, 1);
         SpatialIdx = zeros(size(SlcROI{1}));
         for i = 1:length(SlcROI)
             SpatialIdx(SlcROI{i}(:)) = i;
         end
-        imagesc(SpatialIdx); colorbar;title('Before Converge');
+        imagesc(SpatialIdx); colorbar;title('Before convergent merging');
         subplot(1, 2, 2);
         SpatialIdx = zeros(size(SlcROIMerge{1}));
         for i = 1:length(SlcROIMerge)
             SpatialIdx(SlcROIMerge{i}(:)) = i;
             CluCel{i} = find(SlcROIMerge{i} == 1);
         end
-        imagesc(SpatialIdx); colorbar;title('After Converge');
+        imagesc(SpatialIdx); colorbar;title('After convergent merging');
     end
     SlcROI = SlcROIMerge;
     save(['./ROIs/' FilNam '.mat'],...
